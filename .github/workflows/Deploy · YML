@@ -1,0 +1,161 @@
+# ============================================================
+# Stock Agent App — GitHub Actions CI/CD Workflow
+# File Location: .github/workflows/deploy.yml
+# ============================================================
+
+name: Stock Agent App CI/CD
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+
+jobs:
+
+  # ── JOB 1: LINT & TEST ──────────────────────────────────────
+  lint-and-test:
+    name: Lint & Dependency Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Check syntax
+        run: |
+          python -m py_compile Stock_agent_app.py
+          echo "Syntax check passed"
+
+      - name: Verify key imports
+        run: |
+          python -c "
+          import streamlit, yfinance, pandas, numpy
+          import plotly, statsmodels, sklearn
+          import langchain_groq, langgraph
+          print('All imports OK')
+          print('streamlit :', streamlit.__version__)
+          print('yfinance  :', yfinance.__version__)
+          print('pandas    :', pandas.__version__)
+          print('numpy     :', numpy.__version__)
+          print('plotly    :', plotly.__version__)
+          "
+
+  # ── JOB 2: SECURITY SCAN ────────────────────────────────────
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install scanners
+        run: pip install safety bandit
+
+      - name: Safety check
+        run: |
+          pip install -r requirements.txt
+          safety check -r requirements.txt --output text || true
+
+      - name: Bandit security lint
+        run: bandit -r Stock_agent_app.py -ll || true
+
+  # ── JOB 3: BUILD REPORT ─────────────────────────────────────
+  build-report:
+    name: Build Summary Report
+    runs-on: ubuntu-latest
+    needs: [lint-and-test, security-scan]
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Print build info
+        run: |
+          python -c "
+          import sys, platform, datetime
+          import pandas as pd, numpy as np, streamlit as st
+          print('--- STOCK AGENT APP BUILD REPORT ---')
+          print('Time      :', datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC'))
+          print('Python    :', sys.version.split()[0])
+          print('Platform  :', platform.system(), platform.release())
+          print('Pandas    :', pd.__version__)
+          print('NumPy     :', np.__version__)
+          print('Streamlit :', st.__version__)
+          print('Status    : READY TO DEPLOY')
+          "
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: stock-agent-build-${{ github.sha }}
+          path: |
+            Stock_agent_app.py
+            requirements.txt
+            README.md
+          retention-days: 30
+
+  # ── JOB 4: DEPLOYMENT SUMMARY ───────────────────────────────
+  notify:
+    name: Deployment Summary
+    runs-on: ubuntu-latest
+    needs: build-report
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+
+    steps:
+      - name: Print deployment info
+        run: |
+          echo "========================================"
+          echo "  STOCK AGENT APP - READY TO DEPLOY"
+          echo "========================================"
+          echo "  Branch : ${{ github.ref_name }}"
+          echo "  Commit : ${{ github.sha }}"
+          echo "  Author : ${{ github.actor }}"
+          echo "  Time   : $(date -u)"
+          echo ""
+          echo "  Deploy steps:"
+          echo "  1. Go to share.streamlit.io"
+          echo "  2. Connect this GitHub repo"
+          echo "  3. Main file -> Stock_agent_app.py"
+          echo "  4. Add GROQ_API_KEY to Streamlit secrets"
+          echo "  5. Click Deploy!"
+          echo "========================================"

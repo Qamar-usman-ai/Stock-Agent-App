@@ -918,6 +918,7 @@ if info.get("sector") and info["sector"] != "N/A":
 
 # ── Technical Analysis ────────────────────────────────────────────────────────
 ta_result = None
+ta_sum = None
 if use_ta:
     with st.spinner("📊 Running Technical Analysis ..."):
         ta_result = run_technical_analysis(df.copy())
@@ -963,6 +964,7 @@ if "Volume" in df.columns:
     st.plotly_chart(make_volume_chart(df, ticker), use_container_width=True)
 
 # ── ARIMA Forecast ────────────────────────────────────────────────────────────
+arima_result = None
 if use_arima:
     with st.spinner(f"🔮 Running ARIMA Forecast ({forecast_days} days) ..."):
         arima_result = run_arima_forecast(df.copy(), forecast_days)
@@ -1000,6 +1002,9 @@ if use_arima:
         )
 
 # ── Sentiment Analysis ────────────────────────────────────────────────────────
+sent_result = None
+pt = None
+news = None
 if use_sentiment:
     with st.spinner("📰 Fetching Sentiment & News ..."):
         sent_result = run_sentiment_analysis(ticker)
@@ -1072,6 +1077,26 @@ if any([use_ta, use_arima, use_sentiment]):
     st.markdown("<div class='section-header'>🤖 AI Investment Report</div>", unsafe_allow_html=True)
     
     with st.spinner("🧠 Generating comprehensive investment report... (This may take 30-60 seconds)"):
+        # Helper variables for report
+        forecast_info = ""
+        if use_arima and arima_result and 'forecast_end' in arima_result:
+            forecast_info = f"• {forecast_days}-Day Forecast: ${arima_result['forecast_end']:,.2f}\n"
+            if 'expected_change_pct' in arima_result:
+                forecast_info += f"• Expected Change: {arima_result['expected_change_pct']:+.2f}%\n"
+            if 'direction' in arima_result:
+                forecast_info += f"• Direction: {arima_result['direction']}\n"
+        else:
+            forecast_info = "• Forecast data not available\n"
+        
+        sentiment_info = ""
+        if use_sentiment:
+            if pt and any(pt.values()):
+                sentiment_info = f"• Analyst Rating: {pt.get('recommendation_key', 'N/A').upper()}\n"
+            if news:
+                sentiment_info += f"• News Sentiment: Based on {len(news)} recent headlines\n"
+            if not sentiment_info:
+                sentiment_info = "• Sentiment data not available\n"
+        
         # Simple report generation without the full agent for reliability
         report = f"""
 ═══════════════════════════════════════════════════════════
@@ -1095,18 +1120,13 @@ if any([use_ta, use_arima, use_sentiment]):
 • Volatility: {ta_sum['volatility_pct'] if use_ta and ta_sum else 'N/A'}%
 
 4. ARIMA FORECAST INTERPRETATION
-• {forecast_days}-Day Forecast: ${arima_result['forecast_end']:,.2f if use_arima and arima_result and 'forecast_end' in arima_result else 'N/A'}
-• Expected Change: {arima_result['expected_change_pct']:+.2f}% if use_arima and arima_result and 'expected_change_pct' in arima_result else 'N/A'}
-• Direction: {arima_result['direction'] if use_arima and arima_result and 'direction' in arima_result else 'N/A'}
-
+{forecast_info}
 5. RISK ASSESSMENT
 • Bull Case: {ta_sum['trend'] if use_ta and ta_sum and 'uptrend' in ta_sum['trend'].lower() else 'Neutral/Bearish'} technicals
-• Bear Case: {arima_result['direction'] if use_arima and arima_result and arima_result['direction'] == 'Bearish' else 'Bullish/Neutral'} forecast
+• Bear Case: {arima_result['direction'] if use_arima and arima_result and 'direction' in arima_result and arima_result['direction'] == 'Bearish' else 'Bullish/Neutral'} forecast
 
 6. MARKET SENTIMENT
-• Analyst Rating: {pt.get('recommendation_key', 'N/A').upper() if use_sentiment and pt else 'N/A'}
-• News Sentiment: Based on {len(news) if use_sentiment and news else 0} recent headlines
-
+{sentiment_info}
 7. RECOMMENDATION
 Based on the technical analysis and market sentiment, this stock appears to be in a 
 {ta_sum['trend'].lower() if use_ta and ta_sum else 'mixed'} position. 

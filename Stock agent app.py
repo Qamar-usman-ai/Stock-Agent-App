@@ -1,1050 +1,1002 @@
-# ============================================================
-# AI STOCK MARKET ANALYSIS AGENT — STREAMLIT APP
-# LangGraph + Groq Llama 3.1 + yfinance Tools
-# ============================================================
+"""
+📈 Stock Agent App — AI-Powered Stock Market Analysis
+Built with LangGraph · Groq Llama 3.1 · yfinance · ARIMA · Streamlit
+Author: Qamar Usman
+"""
 
-import os
-import json
-import warnings
 import streamlit as st
-warnings.filterwarnings('ignore')
-
-import yfinance as yf
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
-
-from statsmodels.tsa.arima.model import ARIMA
-from statsmodels.tsa.stattools import adfuller
-from sklearn.metrics import mean_squared_error, mean_absolute_error
-
-from langchain_core.tools import tool
-from langchain_core.messages import HumanMessage
-from langchain_groq import ChatGroq          # ← ChatGroq instead of ChatXAI
-from langgraph.graph import StateGraph, END
-from langgraph.prebuilt import ToolNode
-from typing import TypedDict, Annotated, List
-import operator
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import warnings
+import json
+import os
+from datetime import datetime, timedelta
+from typing import TypedDict, Annotated, Sequence
+import operator
 
-# ============================================================
-# PAGE CONFIG & CUSTOM CSS
-# ============================================================
+warnings.filterwarnings("ignore")
+
+# ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="AI Stock Intelligence",
+    page_title="📈 Stock Agent App",
     page_icon="📈",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
+# ── Dark theme CSS ─────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@300;400;500&display=swap');
-
-:root {
-    --bg:        #0a0a0f;
-    --surface:   #111118;
-    --card:      #16161f;
-    --border:    #2a2a3a;
-    --accent:    #00ff88;
-    --accent2:   #7b61ff;
-    --accent3:   #ff6b35;
-    --text:      #e8e8f0;
-    --muted:     #6b6b80;
-    --red:       #ff4466;
-    --green:     #00ff88;
-}
-
-html, body, [class*="css"] {
-    font-family: 'Syne', sans-serif;
-    background-color: var(--bg);
-    color: var(--text);
-}
-.stApp { background: var(--bg); }
-
-section[data-testid="stSidebar"] {
-    background: var(--surface);
-    border-right: 1px solid var(--border);
-}
-section[data-testid="stSidebar"] * { color: var(--text) !important; }
-
-.hero-header {
-    background: linear-gradient(135deg, #0a0a0f 0%, #111118 50%, #0d0d1a 100%);
-    border: 1px solid var(--border);
-    border-radius: 16px;
-    padding: 2rem 2.5rem;
-    margin-bottom: 1.5rem;
-    position: relative;
-    overflow: hidden;
-}
-.hero-header::before {
-    content: '';
-    position: absolute;
-    top: -50%; right: -10%;
-    width: 400px; height: 400px;
-    background: radial-gradient(circle, rgba(0,255,136,0.06) 0%, transparent 70%);
-    pointer-events: none;
-}
-.hero-title {
-    font-size: 2.4rem;
-    font-weight: 800;
-    background: linear-gradient(135deg, #00ff88, #7b61ff);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    margin: 0;
-    letter-spacing: -1px;
-}
-.hero-sub {
-    font-family: 'JetBrains Mono', monospace;
-    color: var(--muted);
-    font-size: 0.8rem;
-    margin-top: 0.4rem;
-    letter-spacing: 2px;
-    text-transform: uppercase;
-}
-
-.metric-card {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 1.2rem 1.4rem;
-    margin-bottom: 1rem;
-}
-.metric-label {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.7rem;
-    color: var(--muted);
-    text-transform: uppercase;
-    letter-spacing: 2px;
-    margin-bottom: 0.4rem;
-}
-.metric-value            { font-size: 1.6rem; font-weight: 700; color: var(--text); }
-.metric-value.green      { color: var(--green); }
-.metric-value.red        { color: var(--red); }
-.metric-value.purple     { color: var(--accent2); }
-
-.section-title {
-    font-size: 0.75rem;
-    font-family: 'JetBrains Mono', monospace;
-    color: var(--muted);
-    letter-spacing: 3px;
-    text-transform: uppercase;
-    margin: 1.5rem 0 0.8rem;
-    padding-bottom: 0.5rem;
-    border-bottom: 1px solid var(--border);
-}
-
-.report-box {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-left: 3px solid var(--accent);
-    border-radius: 12px;
-    padding: 1.8rem 2rem;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.82rem;
-    line-height: 1.8;
-    color: var(--text);
-    white-space: pre-wrap;
-    word-wrap: break-word;
-}
-
-.stButton > button {
-    background: linear-gradient(135deg, #00ff88, #00cc6a) !important;
-    color: #0a0a0f !important;
-    border: none !important;
-    border-radius: 8px !important;
-    font-family: 'Syne', sans-serif !important;
-    font-weight: 700 !important;
-    font-size: 0.95rem !important;
-    padding: 0.6rem 1.5rem !important;
-    width: 100% !important;
-    letter-spacing: 0.5px;
-    transition: opacity 0.2s;
-}
-.stButton > button:hover { opacity: 0.85 !important; }
-
-.stSelectbox > div > div,
-.stTextInput > div > div > input,
-.stNumberInput > div > div > input,
-.stSlider > div {
-    background: var(--card) !important;
-    border: 1px solid var(--border) !important;
-    border-radius: 8px !important;
-    color: var(--text) !important;
-}
-.stTextInput > div > div > input[type="password"] {
-    font-family: 'JetBrains Mono', monospace !important;
-}
-div[data-testid="stExpander"] {
-    background: var(--card);
-    border: 1px solid var(--border) !important;
-    border-radius: 10px;
-}
-.stProgress > div > div { background: var(--accent) !important; }
-.js-plotly-plot { border-radius: 12px; overflow: hidden; }
+    .stApp { background-color: #0e1117; color: #fafafa; }
+    .main-header {
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+        padding: 2rem; border-radius: 12px; margin-bottom: 2rem;
+        border: 1px solid #00d4ff33;
+        text-align: center;
+    }
+    .main-header h1 { color: #00d4ff; font-size: 2.5rem; margin: 0; }
+    .main-header p  { color: #8892b0; margin: 0.5rem 0 0; }
+    .metric-card {
+        background: #1a1a2e; border: 1px solid #00d4ff33;
+        border-radius: 10px; padding: 1rem; text-align: center;
+    }
+    .metric-card .label { color: #8892b0; font-size: 0.8rem; text-transform: uppercase; }
+    .metric-card .value { color: #00d4ff; font-size: 1.6rem; font-weight: bold; }
+    .metric-card .change-pos { color: #00ff88; font-size: 0.9rem; }
+    .metric-card .change-neg { color: #ff4444; font-size: 0.9rem; }
+    .section-header {
+        color: #00d4ff; font-size: 1.3rem; font-weight: bold;
+        border-bottom: 2px solid #00d4ff44; padding-bottom: 0.5rem;
+        margin: 1.5rem 0 1rem;
+    }
+    .report-box {
+        background: #1a1a2e; border: 1px solid #00d4ff33;
+        border-radius: 10px; padding: 1.5rem;
+        white-space: pre-wrap; font-family: 'Courier New', monospace;
+        font-size: 0.88rem; color: #ccd6f6; line-height: 1.6;
+        max-height: 600px; overflow-y: auto;
+    }
+    .status-ok  { color: #00ff88; }
+    .status-err { color: #ff4444; }
+    div[data-testid="stSidebar"] { background: #0d1117; border-right: 1px solid #00d4ff22; }
+    .stButton > button {
+        background: linear-gradient(135deg, #00d4ff, #0080ff);
+        color: #000; font-weight: bold; border: none;
+        border-radius: 8px; padding: 0.6rem 2rem;
+        font-size: 1rem; width: 100%;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-
-# ============================================================
-# SIDEBAR — USER CONTROLS
-# ============================================================
-with st.sidebar:
-    st.markdown("""
-    <div style='padding:1rem 0 0.5rem'>
-        <div style='font-size:1.3rem;font-weight:800;
-        background:linear-gradient(135deg,#00ff88,#7b61ff);
-        -webkit-background-clip:text;-webkit-text-fill-color:transparent;
-        background-clip:text;'>⚡ AI Stock Agent</div>
-        <div style='font-family:JetBrains Mono,monospace;font-size:0.65rem;
-        color:#6b6b80;letter-spacing:2px;text-transform:uppercase;margin-top:2px;'>
-        Powered by Groq Llama 3.1 + LangGraph</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # ── API KEY ──────────────────────────────────────────────
-    st.markdown('<div class="section-title">🔑 API Configuration</div>',
-                unsafe_allow_html=True)
-    api_key = st.text_input(
-        "Groq API Key",
-        type="password",
-        placeholder="gsk_xxxxxxxxxxxxxxxxxxxxxxxx",
-        help="Get your FREE key from console.groq.com"
-    )
-    st.markdown("""
-    <div style='font-family:JetBrains Mono,monospace;font-size:0.65rem;color:#6b6b80;
-    margin-top:-0.5rem;margin-bottom:0.8rem;'>
-    🆓 Free key →
-    <a href="https://console.groq.com" target="_blank"
-       style='color:#7b61ff;'>console.groq.com</a>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # ── MODEL SELECTION ──────────────────────────────────────
-    st.markdown('<div class="section-title">🤖 Groq Model</div>', unsafe_allow_html=True)
-    groq_model = st.selectbox(
-        "Select Model",
-        [
-            "llama-3.1-8b-instant",       # fastest, free
-            "llama-3.3-70b-versatile",    # smartest
-            "llama-3.1-70b-versatile",    # very smart
-            "mixtral-8x7b-32768",         # long context
-            "gemma2-9b-it",               # balanced
-        ],
-        index=0,
-        help="llama-3.1-8b-instant is fastest and completely free"
-    )
-
-    model_badges = {
-        "llama-3.1-8b-instant":    ("⚡ Fastest — Recommended",   "#00ff88"),
-        "llama-3.3-70b-versatile": ("🧠 Most Intelligent",         "#7b61ff"),
-        "llama-3.1-70b-versatile": ("🧠 Very Smart",               "#7b61ff"),
-        "mixtral-8x7b-32768":      ("📚 32K Long Context",          "#7b61ff"),
-        "gemma2-9b-it":            ("🔬 Balanced Speed/Quality",    "#00ff88"),
-    }
-    badge_text, badge_color = model_badges.get(groq_model, ("✅ Ready", "#00ff88"))
-    st.markdown(
-        f"<div style='font-family:JetBrains Mono,monospace;font-size:0.68rem;"
-        f"color:{badge_color};margin-top:-0.4rem;margin-bottom:0.5rem;'>"
-        f"{badge_text}</div>",
-        unsafe_allow_html=True
-    )
-
-    # ── ASSET SELECTION ──────────────────────────────────────
-    st.markdown('<div class="section-title">🎯 Select Asset</div>', unsafe_allow_html=True)
-
-    asset_category = st.selectbox(
-        "Category",
-        ["📈 US Stocks", "🌍 Market Indices", "🛢️ Commodities",
-         "💱 Currencies & Bonds", "🇵🇰 Pakistan (PSX)", "✏️ Custom Ticker"]
-    )
-
-    ASSET_MAP = {
-        "📈 US Stocks": {
-            "Apple (AAPL)":     "AAPL",
-            "Microsoft (MSFT)": "MSFT",
-            "Google (GOOGL)":   "GOOGL",
-            "Tesla (TSLA)":     "TSLA",
-            "NVIDIA (NVDA)":    "NVDA",
-            "Amazon (AMZN)":    "AMZN",
-            "Meta (META)":      "META",
-            "JPMorgan (JPM)":   "JPM",
-        },
-        "🌍 Market Indices": {
-            "S&P 500":          "^GSPC",
-            "NASDAQ":           "^IXIC",
-            "Dow Jones":        "^DJI",
-            "VIX Fear Index":   "^VIX",
-            "NIFTY 50 (India)": "^NSEI",
-            "FTSE 100 (UK)":    "^FTSE",
-        },
-        "🛢️ Commodities": {
-            "Crude Oil":   "CL=F",
-            "Gold":        "GC=F",
-            "Silver":      "SI=F",
-            "Natural Gas": "NG=F",
-            "Copper":      "HG=F",
-        },
-        "💱 Currencies & Bonds": {
-            "US 10Y Treasury": "^TNX",
-            "USD Index":       "DX-Y.NYB",
-            "EUR/USD":         "EURUSD=X",
-            "GBP/USD":         "GBPUSD=X",
-        },
-        "🇵🇰 Pakistan (PSX)": {
-            "KSE-100 Index":      "^KSE100",
-            "Engro (ENGRO)":      "ENGRO.KA",
-            "HBL Bank":           "HBL.KA",
-            "OGDC":               "OGDC.KA",
-            "Pakistan State Oil": "PSO.KA",
-            "Lucky Cement":       "LUCK.KA",
-            "MCB Bank":           "MCB.KA",
-        },
-        "✏️ Custom Ticker": {}
-    }
-
-    if asset_category == "✏️ Custom Ticker":
-        ticker_input    = st.text_input("Enter Ticker Symbol",
-                                        placeholder="e.g. AAPL, ^GSPC, GC=F, ENGRO.KA")
-        selected_ticker = ticker_input.upper().strip() if ticker_input else ""
-        display_name    = selected_ticker
-    else:
-        asset_options   = ASSET_MAP[asset_category]
-        selected_asset  = st.selectbox("Select Asset", list(asset_options.keys()))
-        selected_ticker = asset_options[selected_asset]
-        display_name    = selected_asset
-
-    # ── ANALYSIS SETTINGS ────────────────────────────────────
-    st.markdown('<div class="section-title">⚙️ Analysis Settings</div>', unsafe_allow_html=True)
-
-    data_period = st.selectbox(
-        "Historical Data Period",
-        ["6mo", "1y", "2y", "3y", "5y"],
-        index=2,
-        help="How much historical data to use for training"
-    )
-
-    forecast_days = st.slider(
-        "Forecast Days",
-        min_value=7, max_value=90, value=30, step=7,
-        help="How many days ahead to predict"
-    )
-
-    # ── TOOLS ────────────────────────────────────────────────
-    st.markdown('<div class="section-title">🔧 Tools to Run</div>', unsafe_allow_html=True)
-    run_technical  = st.checkbox("Technical Analysis",      value=True)
-    run_arima      = st.checkbox("ARIMA Prediction",        value=True)
-    run_sentiment  = st.checkbox("Sentiment & News",        value=True)
-    run_llm_report = st.checkbox("AI Report (Groq Llama)",  value=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    run_button = st.button("🚀 Run Analysis", use_container_width=True)
-
-    st.markdown("""
-    <div style='margin-top:2rem;padding:1rem;background:#16161f;border-radius:10px;
-    border:1px solid #2a2a3a;font-family:JetBrains Mono,monospace;
-    font-size:0.65rem;color:#6b6b80;'>
-    ⚠️ For educational purposes only.<br>Not financial advice.
-    </div>
-    """, unsafe_allow_html=True)
-
-
-# ============================================================
-# MAIN HEADER
-# ============================================================
-st.markdown("""
-<div class="hero-header">
-    <div class="hero-title">AI Stock Intelligence Platform</div>
-    <div class="hero-sub">
-    LangGraph Agent · Groq Llama 3.1 · yfinance · ARIMA Forecasting
-    </div>
-</div>
-""", unsafe_allow_html=True)
-
-
-# ============================================================
-# HELPER FUNCTIONS
-# ============================================================
-
-def fetch_data(ticker, period):
-    stock = yf.download(ticker, period=period, progress=False)
-    if stock.empty:
-        return None
-    df = pd.DataFrame({
-        'Open':   stock['Open'].squeeze(),
-        'High':   stock['High'].squeeze(),
-        'Low':    stock['Low'].squeeze(),
-        'Close':  stock['Close'].squeeze(),
-        'Volume': stock['Volume'].squeeze(),
-    })
+# ══════════════════════════════════════════════════════════════════════════════
+#  LAZY IMPORTS (avoid crash on Streamlit Cloud if a pkg is missing)
+# ══════════════════════════════════════════════════════════════════════════════
+@st.cache_resource(show_spinner=False)
+def load_heavy_libs():
+    errors = []
+    libs = {}
     try:
-        vix   = yf.download("^VIX",     period=period, progress=False)['Close']
-        gold  = yf.download("GC=F",     period=period, progress=False)['Close']
-        oil   = yf.download("CL=F",     period=period, progress=False)['Close']
-        bonds = yf.download("^TNX",     period=period, progress=False)['Close']
-        df['VIX_lag1']   = vix.reindex(df.index).shift(1)
-        df['Gold_lag1']  = gold.reindex(df.index).shift(1)
-        df['Oil_lag1']   = oil.reindex(df.index).shift(1)
-        df['Bonds_lag1'] = bonds.reindex(df.index).shift(1)
-    except:
+        import yfinance as yf
+        libs["yf"] = yf
+    except Exception as e:
+        errors.append(f"yfinance: {e}")
+    try:
+        from statsmodels.tsa.arima.model import ARIMA
+        libs["ARIMA"] = ARIMA
+    except Exception as e:
+        errors.append(f"statsmodels: {e}")
+    try:
+        from langchain_groq import ChatGroq
+        from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
+        from langchain_core.tools import tool
+        from langgraph.graph import StateGraph, END
+        from langgraph.prebuilt import ToolNode
+        libs["ChatGroq"] = ChatGroq
+        libs["HumanMessage"] = HumanMessage
+        libs["AIMessage"] = AIMessage
+        libs["SystemMessage"] = SystemMessage
+        libs["ToolMessage"] = ToolMessage
+        libs["tool"] = tool
+        libs["StateGraph"] = StateGraph
+        libs["END"] = END
+        libs["ToolNode"] = ToolNode
+    except Exception as e:
+        errors.append(f"langchain/langgraph: {e}")
+    return libs, errors
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  TOOL 1 — DATA COLLECTION
+# ══════════════════════════════════════════════════════════════════════════════
+def fetch_stock_data(ticker: str, period: str = "1y"):
+    """Robust yfinance fetch with multiple fallbacks."""
+    libs, _ = load_heavy_libs()
+    yf = libs.get("yf")
+    if yf is None:
+        return None, "yfinance not available"
+
+    ticker = ticker.strip().upper()
+
+    # Attempt 1: Ticker.history()
+    try:
+        t = yf.Ticker(ticker)
+        df = t.history(period=period, auto_adjust=True, actions=False)
+        if df is not None and not df.empty:
+            df.index = pd.to_datetime(df.index)
+            if df.index.tz is not None:
+                df.index = df.index.tz_localize(None)
+            return df, None
+    except Exception:
         pass
-    return df.dropna(subset=['Close'])
+
+    # Attempt 2: yf.download()
+    try:
+        df = yf.download(ticker, period=period, auto_adjust=True,
+                         progress=False, show_errors=False)
+        if df is not None and not df.empty:
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.get_level_values(0)
+            df.index = pd.to_datetime(df.index)
+            if df.index.tz is not None:
+                df.index = df.index.tz_localize(None)
+            return df, None
+    except Exception:
+        pass
+
+    # Attempt 3: date-range download
+    try:
+        days_map = {"6mo": 180, "1y": 365, "2y": 730, "3y": 1095, "5y": 1825}
+        days = days_map.get(period, 365)
+        end = datetime.today()
+        start = end - timedelta(days=days)
+        df = yf.download(ticker, start=start.strftime("%Y-%m-%d"),
+                         end=end.strftime("%Y-%m-%d"),
+                         auto_adjust=True, progress=False, show_errors=False)
+        if df is not None and not df.empty:
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.get_level_values(0)
+            df.index = pd.to_datetime(df.index)
+            if df.index.tz is not None:
+                df.index = df.index.tz_localize(None)
+            return df, None
+    except Exception as e:
+        return None, f"All fetch attempts failed for '{ticker}': {e}"
+
+    return None, f"No data returned for '{ticker}'. Verify the ticker on finance.yahoo.com"
 
 
-def compute_technicals(df):
-    close = df['Close']
-    df    = df.copy()
-    df['MA_20']  = close.rolling(20).mean()
-    df['MA_50']  = close.rolling(50).mean()
-    df['MA_200'] = close.rolling(200).mean()
+def collect_stock_data(ticker: str, period: str = "1y"):
+    libs, _ = load_heavy_libs()
+    yf = libs.get("yf")
 
+    df, err = fetch_stock_data(ticker, period)
+    if err:
+        return {"error": err}
+
+    info = {}
+    if yf:
+        try:
+            t = yf.Ticker(ticker)
+            raw = t.info or {}
+            info = {
+                "name":        raw.get("longName", ticker),
+                "sector":      raw.get("sector", "N/A"),
+                "industry":    raw.get("industry", "N/A"),
+                "market_cap":  raw.get("marketCap", 0),
+                "pe_ratio":    raw.get("trailingPE", None),
+                "52w_high":    raw.get("fiftyTwoWeekHigh", None),
+                "52w_low":     raw.get("fiftyTwoWeekLow", None),
+                "avg_volume":  raw.get("averageVolume", None),
+                "beta":        raw.get("beta", None),
+                "dividend_yield": raw.get("dividendYield", None),
+                "currency":    raw.get("currency", "USD"),
+                "exchange":    raw.get("exchange", "N/A"),
+            }
+        except Exception:
+            info = {"name": ticker}
+
+    latest = df.iloc[-1]
+    prev   = df.iloc[-2] if len(df) > 1 else latest
+    change    = float(latest["Close"]) - float(prev["Close"])
+    change_pct = (change / float(prev["Close"])) * 100 if float(prev["Close"]) != 0 else 0
+
+    return {
+        "ticker":     ticker,
+        "period":     period,
+        "rows":       len(df),
+        "info":       info,
+        "latest": {
+            "date":    str(df.index[-1].date()),
+            "open":    round(float(latest["Open"]),  4),
+            "high":    round(float(latest["High"]),  4),
+            "low":     round(float(latest["Low"]),   4),
+            "close":   round(float(latest["Close"]), 4),
+            "volume":  int(latest["Volume"]) if "Volume" in df.columns else 0,
+            "change":  round(change, 4),
+            "change_pct": round(change_pct, 2),
+        },
+        "df": df,
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  TOOL 2 — TECHNICAL ANALYSIS
+# ══════════════════════════════════════════════════════════════════════════════
+def run_technical_analysis(df: pd.DataFrame):
+    close = df["Close"].squeeze().astype(float)
+
+    # Moving averages
+    df["MA20"]  = close.rolling(20).mean()
+    df["MA50"]  = close.rolling(50).mean()
+    df["MA200"] = close.rolling(200).mean()
+
+    # RSI
     delta = close.diff()
-    gain  = delta.where(delta > 0, 0).rolling(14).mean()
-    loss  = -delta.where(delta < 0, 0).rolling(14).mean()
-    df['RSI'] = 100 - (100 / (1 + gain / (loss + 1e-10)))
+    gain  = delta.clip(lower=0).rolling(14).mean()
+    loss  = (-delta.clip(upper=0)).rolling(14).mean()
+    rs    = gain / loss.replace(0, np.nan)
+    df["RSI"] = 100 - (100 / (1 + rs))
 
-    ema12 = close.ewm(span=12).mean()
-    ema26 = close.ewm(span=26).mean()
-    df['MACD']        = ema12 - ema26
-    df['Signal_Line'] = df['MACD'].ewm(span=9).mean()
-    df['MACD_Hist']   = df['MACD'] - df['Signal_Line']
+    # MACD
+    ema12 = close.ewm(span=12, adjust=False).mean()
+    ema26 = close.ewm(span=26, adjust=False).mean()
+    df["MACD"]        = ema12 - ema26
+    df["MACD_Signal"] = df["MACD"].ewm(span=9, adjust=False).mean()
+    df["MACD_Hist"]   = df["MACD"] - df["MACD_Signal"]
 
-    df['BB_Middle'] = close.rolling(20).mean()
-    bb_std          = close.rolling(20).std()
-    df['BB_Upper']  = df['BB_Middle'] + 2 * bb_std
-    df['BB_Lower']  = df['BB_Middle'] - 2 * bb_std
+    # Bollinger Bands
+    ma20 = close.rolling(20).mean()
+    std20 = close.rolling(20).std()
+    df["BB_Upper"] = ma20 + 2 * std20
+    df["BB_Lower"] = ma20 - 2 * std20
+    df["BB_Middle"] = ma20
 
-    df['Daily_Return']   = close.pct_change()
-    df['Volatility_20d'] = df['Daily_Return'].rolling(20).std() * np.sqrt(252)
-    return df.dropna(subset=['MA_20'])
+    # ATR
+    if "High" in df.columns and "Low" in df.columns:
+        hl = df["High"].astype(float) - df["Low"].astype(float)
+        hc = (df["High"].astype(float) - close.shift()).abs()
+        lc = (df["Low"].astype(float)  - close.shift()).abs()
+        df["ATR"] = pd.concat([hl, hc, lc], axis=1).max(axis=1).rolling(14).mean()
+
+    # OBV
+    if "Volume" in df.columns:
+        vol = df["Volume"].astype(float)
+        obv = (np.sign(close.diff()) * vol).fillna(0).cumsum()
+        df["OBV"] = obv
+
+    # Volatility (annualised)
+    df["Returns"]    = close.pct_change()
+    df["Volatility"] = df["Returns"].rolling(20).std() * np.sqrt(252) * 100
+
+    # Summary
+    last = df.iloc[-1]
+    cur_close = float(close.iloc[-1])
+    rsi_val   = float(last["RSI"])   if not np.isnan(last["RSI"])  else 50
+    macd_val  = float(last["MACD"])  if not np.isnan(last["MACD"]) else 0
+    macd_sig  = float(last["MACD_Signal"]) if not np.isnan(last["MACD_Signal"]) else 0
+
+    # Trend
+    if not np.isnan(last["MA20"]) and not np.isnan(last["MA50"]):
+        if cur_close > float(last["MA20"]) > float(last["MA50"]):
+            trend = "Strong Uptrend"
+        elif cur_close > float(last["MA20"]):
+            trend = "Uptrend"
+        elif cur_close < float(last["MA20"]) < float(last["MA50"]):
+            trend = "Strong Downtrend"
+        else:
+            trend = "Downtrend"
+    else:
+        trend = "Insufficient data"
+
+    rsi_sig   = "Overbought" if rsi_val > 70 else ("Oversold" if rsi_val < 30 else "Neutral")
+    macd_sig2 = "Bullish"    if macd_val > macd_sig else "Bearish"
+
+    bb_upper = float(last["BB_Upper"]) if not np.isnan(last["BB_Upper"]) else cur_close
+    bb_lower = float(last["BB_Lower"]) if not np.isnan(last["BB_Lower"]) else cur_close
+    bb_pos = ((cur_close - bb_lower) / (bb_upper - bb_lower) * 100
+              if (bb_upper - bb_lower) != 0 else 50)
+
+    vol_val = float(last["Volatility"]) if not np.isnan(last["Volatility"]) else 0
+
+    return {
+        "df": df,
+        "summary": {
+            "trend": trend,
+            "rsi":   round(rsi_val, 2),
+            "rsi_signal": rsi_sig,
+            "macd": round(macd_val, 4),
+            "macd_signal": macd_sig2,
+            "bb_position_pct": round(bb_pos, 1),
+            "volatility_pct": round(vol_val, 2),
+            "ma20": round(float(last["MA20"]), 4) if not np.isnan(last["MA20"]) else None,
+            "ma50": round(float(last["MA50"]), 4) if not np.isnan(last["MA50"]) else None,
+            "ma200": round(float(last["MA200"]), 4) if not np.isnan(last["MA200"]) else None,
+        }
+    }
 
 
-def run_arima_model(df, n_days):
-    close = df['Close'].dropna()
-    d     = 0 if adfuller(close)[1] < 0.05 else 1
+# ══════════════════════════════════════════════════════════════════════════════
+#  TOOL 3 — ARIMA FORECASTING
+# ══════════════════════════════════════════════════════════════════════════════
+def run_arima_forecast(df: pd.DataFrame, forecast_days: int = 30):
+    libs, _ = load_heavy_libs()
+    ARIMA_cls = libs.get("ARIMA")
+    if ARIMA_cls is None:
+        return {"error": "statsmodels not available"}
 
-    split      = int(len(close) * 0.80)
-    train, test = close[:split], close[split:]
+    close = df["Close"].squeeze().astype(float).dropna()
+    if len(close) < 50:
+        return {"error": "Insufficient data for ARIMA (need ≥ 50 rows)"}
 
-    fit_train = ARIMA(train, order=(5, d, 2)).fit()
-    rmse = np.sqrt(mean_squared_error(test, fit_train.forecast(steps=len(test))))
-    mae  = mean_absolute_error(test, fit_train.forecast(steps=len(test)))
-
-    fit_full     = ARIMA(close, order=(5, d, 2)).fit()
-    fc_res       = fit_full.get_forecast(steps=n_days)
-    fc_mean      = fc_res.predicted_mean
-    ci           = fc_res.conf_int()
-    fc_dates     = pd.bdate_range(
-        start=close.index[-1] + timedelta(days=1), periods=n_days
-    )
-    forecast_df = pd.DataFrame({
-        'Date':      fc_dates,
-        'Predicted': fc_mean.values,
-        'Lower_95':  ci.iloc[:, 0].values,
-        'Upper_95':  ci.iloc[:, 1].values,
-    })
-    return forecast_df, rmse, mae, d
-
-
-def get_sentiment(ticker):
     try:
-        t    = yf.Ticker(ticker)
-        info = t.info
-        news = t.news[:8] if t.news else []
-        return info, news
-    except:
-        return {}, []
+        model  = ARIMA_cls(close, order=(2, 1, 2))
+        fitted = model.fit()
+        forecast_obj = fitted.get_forecast(steps=forecast_days)
+        mean_fc = forecast_obj.predicted_mean
+        ci      = forecast_obj.conf_int(alpha=0.05)
 
+        last_date  = df.index[-1]
+        future_idx = pd.bdate_range(start=last_date + timedelta(days=1),
+                                    periods=forecast_days)
 
-# ============================================================
-# LANGCHAIN TOOLS
-# ============================================================
-_data_store = {}
-
-@tool
-def collect_stock_data_tool(ticker: str, period: str = "2y") -> str:
-    """Collect historical stock market data using yfinance."""
-    try:
-        df = fetch_data(ticker, period)
-        if df is None:
-            return json.dumps({"error": "No data found"})
-        _data_store[ticker] = df
-        current = float(df['Close'].iloc[-1])
-        return json.dumps({
-            "ticker": ticker, "rows": len(df),
-            "start":  str(df.index[0].date()),
-            "end":    str(df.index[-1].date()),
-            "current_price": round(current, 2),
-            "high_52w": round(float(df['Close'].max()), 2),
-            "low_52w":  round(float(df['Close'].min()), 2),
+        fc_df = pd.DataFrame({
+            "Date":      future_idx[:len(mean_fc)],
+            "Forecast":  mean_fc.values[:len(future_idx)],
+            "Lower_95":  ci.iloc[:len(future_idx), 0].values,
+            "Upper_95":  ci.iloc[:len(future_idx), 1].values,
         })
-    except Exception as e:
-        return json.dumps({"error": str(e)})
 
+        cur = float(close.iloc[-1])
+        end = float(fc_df["Forecast"].iloc[-1])
+        chg = ((end - cur) / cur) * 100
 
-@tool
-def analyze_stock_data_tool(ticker: str) -> str:
-    """Perform complete technical analysis on collected stock data."""
-    try:
-        df = _data_store.get(ticker)
-        if df is None:
-            return json.dumps({"error": "Run collect_stock_data_tool first."})
-        df_a  = compute_technicals(df)
-        _data_store[f"{ticker}_analyzed"] = df_a
-        latest = df_a.iloc[-1]
-        rsi    = float(latest['RSI'])
-        trend  = "BULLISH" if float(latest['MA_20']) > float(latest['MA_50']) else "BEARISH"
-        macd_s = "BULLISH" if float(latest['MACD']) > float(latest['Signal_Line']) else "BEARISH"
-        rsi_sig = ("OVERBOUGHT" if rsi > 70 else "OVERSOLD" if rsi < 30 else "NEUTRAL")
-        return json.dumps({
-            "ticker": ticker, "price": round(float(latest['Close']), 2),
-            "trend": trend, "RSI": round(rsi, 2), "RSI_signal": rsi_sig,
-            "MACD_signal": macd_s,
-            "MA_20":    round(float(latest['MA_20']), 2),
-            "MA_50":    round(float(latest['MA_50']), 2),
-            "BB_Upper": round(float(latest['BB_Upper']), 2),
-            "BB_Lower": round(float(latest['BB_Lower']), 2),
-            "volatility_pct": round(float(latest['Volatility_20d']) * 100, 2),
-            "support":    round(float(df_a['Low'].tail(50).min()), 2),
-            "resistance": round(float(df_a['High'].tail(50).max()), 2),
-            "30d_return": round(float(df['Close'].pct_change(30).iloc[-1]) * 100, 2),
-        })
-    except Exception as e:
-        return json.dumps({"error": str(e)})
-
-
-@tool
-def predict_arima_tool(ticker: str, forecast_days: int = 30) -> str:
-    """Run ARIMA model to forecast future prices."""
-    try:
-        df = _data_store.get(f"{ticker}_analyzed", _data_store.get(ticker))
-        if df is None:
-            return json.dumps({"error": "No data found."})
-        fdf, rmse, mae, d = run_arima_model(df, forecast_days)
-        _data_store[f"{ticker}_forecast"] = fdf
-        current  = float(df['Close'].iloc[-1])
-        pred_end = float(fdf['Predicted'].iloc[-1])
-        pct_chg  = round((pred_end - current) / current * 100, 2)
-        return json.dumps({
-            "ticker": ticker, "model": f"ARIMA(5,{d},2)",
-            "RMSE": round(rmse, 4), "MAE": round(mae, 4),
-            "current_price": round(current, 2),
-            "predicted_end": round(pred_end, 2),
-            "pct_change":    pct_chg,
-            "direction":     "UP" if pct_chg > 0 else "DOWN",
+        return {
+            "fc_df":    fc_df,
+            "current":  round(cur, 4),
+            "forecast_end": round(end, 4),
+            "expected_change_pct": round(chg, 2),
+            "direction": "Bullish" if chg > 0 else "Bearish",
             "forecast_days": forecast_days,
-            "next_7_days":   fdf.head(7)[['Date', 'Predicted']].to_dict('records'),
-        })
+        }
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        return {"error": f"ARIMA failed: {e}"}
 
 
-@tool
-def get_sentiment_tool(ticker: str) -> str:
-    """Get analyst recommendations and recent news headlines."""
+# ══════════════════════════════════════════════════════════════════════════════
+#  TOOL 4 — SENTIMENT & NEWS
+# ══════════════════════════════════════════════════════════════════════════════
+def run_sentiment_analysis(ticker: str):
+    libs, _ = load_heavy_libs()
+    yf = libs.get("yf")
+    if yf is None:
+        return {"error": "yfinance not available"}
+
+    result = {
+        "recommendations": [],
+        "news": [],
+        "analyst_summary": {},
+        "price_targets": {},
+    }
+
     try:
-        info, news = get_sentiment(ticker)
-        return json.dumps({
-            "company":        info.get('longName', ticker),
-            "sector":         info.get('sector', 'N/A'),
-            "recommendation": info.get('recommendationKey', 'N/A'),
-            "target_mean":    info.get('targetMeanPrice', 'N/A'),
-            "target_high":    info.get('targetHighPrice', 'N/A'),
-            "num_analysts":   info.get('numberOfAnalystOpinions', 'N/A'),
-            "headlines": [
-                {"title": a.get('title',''), "publisher": a.get('publisher','')}
-                for a in news
-            ],
-        })
+        t = yf.Ticker(ticker)
+
+        # Analyst recommendations
+        try:
+            rec = t.recommendations
+            if rec is not None and not rec.empty:
+                # Flatten multi-index if present
+                if isinstance(rec.columns, pd.MultiIndex):
+                    rec.columns = [" ".join(c).strip() for c in rec.columns]
+                result["recommendations"] = rec.tail(5).to_dict("records")
+        except Exception:
+            pass
+
+        # News headlines
+        try:
+            news = t.news or []
+            result["news"] = [
+                {"title": n.get("title", ""), "publisher": n.get("publisher", ""),
+                 "link": n.get("link", "")}
+                for n in news[:6]
+            ]
+        except Exception:
+            pass
+
+        # Analyst price target
+        try:
+            info = t.info or {}
+            result["price_targets"] = {
+                "target_mean":  info.get("targetMeanPrice"),
+                "target_high":  info.get("targetHighPrice"),
+                "target_low":   info.get("targetLowPrice"),
+                "current_price": info.get("currentPrice"),
+                "recommendation_key": info.get("recommendationKey", "N/A"),
+                "num_analyst_opinions": info.get("numberOfAnalystOpinions"),
+            }
+        except Exception:
+            pass
+
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        result["error"] = str(e)
+
+    return result
 
 
-# ============================================================
-# LANGGRAPH AGENT — ChatGroq with Llama 3.1
-# ============================================================
-class AgentState(TypedDict):
-    messages: Annotated[List, operator.add]
+# ══════════════════════════════════════════════════════════════════════════════
+#  LangGraph AGENT
+# ══════════════════════════════════════════════════════════════════════════════
+def build_agent(groq_api_key: str, model_name: str):
+    libs, errs = load_heavy_libs()
+    required = ["ChatGroq", "HumanMessage", "SystemMessage", "tool",
+                "StateGraph", "END", "ToolNode"]
+    missing = [k for k in required if k not in libs]
+    if missing:
+        return None, f"Missing libraries: {missing}. Errors: {errs}"
 
+    ChatGroq    = libs["ChatGroq"]
+    HumanMessage = libs["HumanMessage"]
+    SystemMessage = libs["SystemMessage"]
+    tool_dec    = libs["tool"]
+    StateGraph  = libs["StateGraph"]
+    END         = libs["END"]
+    ToolNode    = libs["ToolNode"]
 
-def build_agent(api_key_val: str, model_name: str):
-    """Build LangGraph agent using ChatGroq (Llama 3.1)."""
-    llm = ChatGroq(
-        model=model_name,           # e.g. "llama-3.1-8b-instant"
-        temperature=0,
-        groq_api_key=api_key_val,
-        max_tokens=4096,
-    )
-    tools_list = [
-        collect_stock_data_tool,
-        analyze_stock_data_tool,
-        predict_arima_tool,
-        get_sentiment_tool,
-    ]
+    # ── Define LangChain tools ────────────────────────────────────────────────
+    _data_store: dict = {}  # shared state between tools within one run
+
+    @tool_dec
+    def collect_data_tool(ticker: str, period: str = "1y") -> str:
+        """Collect historical price data for a stock ticker."""
+        res = collect_stock_data(ticker, period)
+        if "error" in res:
+            return f"ERROR: {res['error']}"
+        _data_store["data"]   = res
+        _data_store["ticker"] = ticker
+        _data_store["period"] = period
+        return json.dumps({k: v for k, v in res.items() if k != "df"}, default=str)
+
+    @tool_dec
+    def technical_analysis_tool(ticker: str) -> str:
+        """Run technical analysis (RSI, MACD, Bollinger Bands, MAs) on the stock."""
+        data = _data_store.get("data")
+        if data is None:
+            res = collect_stock_data(ticker, "1y")
+            if "error" in res:
+                return f"ERROR: {res['error']}"
+            _data_store["data"] = res
+        df  = _data_store["data"]["df"]
+        res = run_technical_analysis(df.copy())
+        _data_store["ta"] = res
+        return json.dumps(res["summary"], default=str)
+
+    @tool_dec
+    def arima_forecast_tool(ticker: str, forecast_days: int = 30) -> str:
+        """Run ARIMA forecast for the next N days."""
+        data = _data_store.get("data")
+        if data is None:
+            res = collect_stock_data(ticker, "1y")
+            if "error" in res:
+                return f"ERROR: {res['error']}"
+            _data_store["data"] = res
+        df  = _data_store["data"]["df"]
+        res = run_arima_forecast(df.copy(), forecast_days)
+        if "error" in res:
+            return f"ERROR: {res['error']}"
+        _data_store["arima"] = res
+        return json.dumps({k: v for k, v in res.items() if k != "fc_df"}, default=str)
+
+    @tool_dec
+    def sentiment_tool(ticker: str) -> str:
+        """Fetch analyst recommendations, price targets and latest news headlines."""
+        res = run_sentiment_analysis(ticker)
+        _data_store["sentiment"] = res
+        return json.dumps(res, default=str)
+
+    tools_list = [collect_data_tool, technical_analysis_tool,
+                  arima_forecast_tool, sentiment_tool]
+
+    llm = ChatGroq(api_key=groq_api_key, model=model_name,
+                   temperature=0.2, max_tokens=4096)
     llm_with_tools = llm.bind_tools(tools_list)
 
+    # ── LangGraph state ───────────────────────────────────────────────────────
+    class AgentState(TypedDict):
+        messages: Annotated[Sequence, operator.add]
+
+    tool_node = ToolNode(tools_list)
+
     def agent_node(state: AgentState):
-        return {"messages": [llm_with_tools.invoke(state["messages"])]}
+        msgs = state["messages"]
+        response = llm_with_tools.invoke(msgs)
+        return {"messages": [response]}
 
     def should_continue(state: AgentState):
         last = state["messages"][-1]
-        return "tools" if (hasattr(last, "tool_calls") and last.tool_calls) else END
+        if hasattr(last, "tool_calls") and last.tool_calls:
+            return "tools"
+        return END
 
-    tool_node_obj = ToolNode(tools_list)
     graph = StateGraph(AgentState)
     graph.add_node("agent", agent_node)
-    graph.add_node("tools", tool_node_obj)
+    graph.add_node("tools", tool_node)
     graph.set_entry_point("agent")
-    graph.add_conditional_edges(
-        "agent", should_continue, {"tools": "tools", END: END}
-    )
+    graph.add_conditional_edges("agent", should_continue, {"tools": "tools", END: END})
     graph.add_edge("tools", "agent")
-    return graph.compile()
+
+    compiled = graph.compile()
+    return compiled, _data_store
 
 
-# ============================================================
-# CHART FUNCTIONS
-# ============================================================
-def plot_price_chart(df, ticker, forecast_df=None):
-    fig = make_subplots(
-        rows=3, cols=1, shared_xaxes=True,
-        vertical_spacing=0.05,
-        row_heights=[0.6, 0.2, 0.2],
-        subplot_titles=("", "RSI", "MACD")
-    )
-    # Candlestick
-    fig.add_trace(go.Candlestick(
-        x=df.index, open=df['Open'], high=df['High'],
-        low=df['Low'], close=df['Close'], name="Price",
-        increasing_line_color='#00ff88', decreasing_line_color='#ff4466',
-        increasing_fillcolor='rgba(0,255,136,0.3)',
-        decreasing_fillcolor='rgba(255,68,102,0.3)',
-    ), row=1, col=1)
+def run_agent(ticker: str, period: str, forecast_days: int,
+              groq_api_key: str, model_name: str,
+              use_ta: bool, use_arima: bool, use_sentiment: bool):
 
-    if 'MA_20' in df.columns:
-        fig.add_trace(go.Scatter(x=df.index, y=df['MA_20'], name="MA 20",
-            line=dict(color='#7b61ff', width=1.5)), row=1, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=df['MA_50'], name="MA 50",
-            line=dict(color='#ff6b35', width=1.5)), row=1, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=df['BB_Upper'], name="BB Upper",
-            line=dict(color='rgba(123,97,255,0.4)', width=1, dash='dot')), row=1, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=df['BB_Lower'], name="BB Lower",
-            line=dict(color='rgba(123,97,255,0.4)', width=1, dash='dot'),
-            fill='tonexty', fillcolor='rgba(123,97,255,0.04)'), row=1, col=1)
+    compiled, store = build_agent(groq_api_key, model_name)
+    if compiled is None:
+        return None, store, "Agent build failed"   # store contains the error string here
 
-    if forecast_df is not None:
-        fig.add_trace(go.Scatter(
-            x=forecast_df['Date'], y=forecast_df['Predicted'],
-            name="ARIMA Forecast",
-            line=dict(color='#00ff88', width=2, dash='dash')), row=1, col=1)
-        fig.add_trace(go.Scatter(
-            x=pd.concat([forecast_df['Date'], forecast_df['Date'][::-1]]),
-            y=pd.concat([forecast_df['Upper_95'], forecast_df['Lower_95'][::-1]]),
-            fill='toself', fillcolor='rgba(0,255,136,0.07)',
-            line=dict(color='rgba(0,255,136,0)'), name="95% CI"), row=1, col=1)
+    libs   = load_heavy_libs()[0]
+    SM_cls = libs.get("SystemMessage")
+    HM_cls = libs.get("HumanMessage")
 
-    if 'RSI' in df.columns:
-        fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], name="RSI",
-            line=dict(color='#ff6b35', width=1.5)), row=2, col=1)
-        fig.add_hline(y=70, line_dash="dot", line_color="rgba(255,68,102,0.5)", row=2, col=1)
-        fig.add_hline(y=30, line_dash="dot", line_color="rgba(0,255,136,0.5)", row=2, col=1)
+    tools_requested = ["collect_data_tool"]
+    if use_ta:        tools_requested.append("technical_analysis_tool")
+    if use_arima:     tools_requested.append("arima_forecast_tool")
+    if use_sentiment: tools_requested.append("sentiment_tool")
 
-    if 'MACD' in df.columns:
-        fig.add_trace(go.Scatter(x=df.index, y=df['MACD'], name="MACD",
-            line=dict(color='#7b61ff', width=1.5)), row=3, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=df['Signal_Line'], name="Signal",
-            line=dict(color='#ff6b35', width=1.5)), row=3, col=1)
-        colors = ['#00ff88' if v >= 0 else '#ff4466' for v in df['MACD_Hist']]
-        fig.add_trace(go.Bar(x=df.index, y=df['MACD_Hist'], name="Histogram",
-            marker_color=colors, opacity=0.6), row=3, col=1)
+    system_prompt = f"""You are an expert financial analyst AI. Analyze the stock {ticker}.
 
-    fig.update_layout(
-        template="plotly_dark", paper_bgcolor='#111118', plot_bgcolor='#0a0a0f',
-        font=dict(family='JetBrains Mono', color='#e8e8f0', size=11),
-        xaxis_rangeslider_visible=False,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, bgcolor='rgba(0,0,0,0)'),
-        height=650, margin=dict(l=10, r=10, t=20, b=10),
-        title=dict(text=f"  {ticker} — Price & Indicators",
-                   font=dict(size=14, color='#6b6b80'))
-    )
-    for i in [1, 2, 3]:
-        fig.update_xaxes(gridcolor='#1e1e2e', showgrid=True, row=i, col=1)
-        fig.update_yaxes(gridcolor='#1e1e2e', showgrid=True, row=i, col=1)
-    return fig
+Use these tools IN ORDER:
+1. collect_data_tool — always first
+{"2. technical_analysis_tool — run technical analysis" if use_ta else ""}
+{"3. arima_forecast_tool — run ARIMA forecast for " + str(forecast_days) + " days" if use_arima else ""}
+{"4. sentiment_tool — fetch news and analyst data" if use_sentiment else ""}
 
+After ALL tools finish, write a PROFESSIONAL 7-SECTION INVESTMENT REPORT:
 
-def plot_volume_chart(df):
-    colors = ['#00ff88' if df['Close'].iloc[i] >= df['Open'].iloc[i]
-              else '#ff4466' for i in range(len(df))]
-    fig = go.Figure(go.Bar(x=df.index, y=df['Volume'],
-                           marker_color=colors, opacity=0.7, name="Volume"))
-    fig.update_layout(
-        template="plotly_dark", paper_bgcolor='#111118', plot_bgcolor='#0a0a0f',
-        font=dict(family='JetBrains Mono', color='#e8e8f0', size=11),
-        height=200, margin=dict(l=10, r=10, t=10, b=10), showlegend=False,
-    )
-    fig.update_xaxes(gridcolor='#1e1e2e')
-    fig.update_yaxes(gridcolor='#1e1e2e')
-    return fig
-
-
-# ============================================================
-# MAIN APP LOGIC
-# ============================================================
-if not run_button:
-    # Welcome screen
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.markdown("""<div class="metric-card">
-            <div class="metric-label">Step 1</div>
-            <div style="font-size:1.8rem;margin:0.3rem 0">🔑</div>
-            <div style="font-weight:700;margin-bottom:0.3rem">Enter Groq API Key</div>
-            <div style="color:#6b6b80;font-size:0.85rem">
-            Free key from
-            <a href="https://console.groq.com" target="_blank"
-               style="color:#7b61ff;">console.groq.com</a>
-            </div></div>""", unsafe_allow_html=True)
-    with c2:
-        st.markdown("""<div class="metric-card">
-            <div class="metric-label">Step 2</div>
-            <div style="font-size:1.8rem;margin:0.3rem 0">🎯</div>
-            <div style="font-weight:700;margin-bottom:0.3rem">Pick Your Asset</div>
-            <div style="color:#6b6b80;font-size:0.85rem">
-            Stocks, Indices, Oil, Gold, PSX Pakistan,
-            or any custom ticker
-            </div></div>""", unsafe_allow_html=True)
-    with c3:
-        st.markdown("""<div class="metric-card">
-            <div class="metric-label">Step 3</div>
-            <div style="font-size:1.8rem;margin:0.3rem 0">🚀</div>
-            <div style="font-weight:700;margin-bottom:0.3rem">Run Analysis</div>
-            <div style="color:#6b6b80;font-size:0.85rem">
-            AI Agent runs all tools and writes
-            a complete professional report
-            </div></div>""", unsafe_allow_html=True)
-
-    st.markdown("""
-    <div style='margin-top:1.5rem;padding:1.5rem;background:#16161f;border:1px solid #2a2a3a;
-    border-radius:12px;font-family:JetBrains Mono,monospace;font-size:0.8rem;
-    color:#6b6b80;line-height:1.8;'>
-    <span style='color:#00ff88;'>$</span> Available tools in this agent:<br>
-    <span style='color:#7b61ff;'>→</span> Tool 1 : Data Collection    (yfinance — any ticker globally)<br>
-    <span style='color:#7b61ff;'>→</span> Tool 2 : Technical Analysis  (RSI · MACD · Bollinger Bands · MA)<br>
-    <span style='color:#7b61ff;'>→</span> Tool 3 : ARIMA Forecasting   (7–90 days ahead + 95% confidence)<br>
-    <span style='color:#7b61ff;'>→</span> Tool 4 : Sentiment & News    (analyst ratings · headlines)<br>
-    <span style='color:#00ff88;'>→</span> Brain  : Groq Llama 3.1      (free · ultra-fast · writes full report)<br>
-    <br>
-    <span style='color:#00ff88;'>$</span> Default model :
-    <span style='color:#e8e8f0;'>llama-3.1-8b-instant</span>
-    &nbsp;|&nbsp; Provider :
-    <span style='color:#e8e8f0;'>Groq Cloud (FREE)</span>
-    &nbsp;|&nbsp; Speed :
-    <span style='color:#00ff88;'>⚡ ~500 tokens/sec</span>
-    </div>
-    """, unsafe_allow_html=True)
-
-else:
-    # ── VALIDATION ────────────────────────────────────────────
-    if not selected_ticker:
-        st.error("⚠️ Please enter a valid ticker symbol in the sidebar.")
-        st.stop()
-
-    if run_llm_report and not api_key:
-        st.warning("⚠️ No Groq API key. AI Report skipped — all other tools will still run.")
-        run_llm_report = False
-
-    # Init shared variables
-    rsi = vol = trend = macd_s = rsi_sig = rec = info = None
-    df_analyzed = forecast_df = arima_result = None
-
-    # ── DATA COLLECTION ───────────────────────────────────────
-    st.markdown(
-        f'<div class="section-title">📡 Data Collection — {display_name} ({selected_ticker})</div>',
-        unsafe_allow_html=True
-    )
-    with st.spinner(f"Downloading {data_period} of data for {selected_ticker}..."):
-        df_raw = fetch_data(selected_ticker, data_period)
-
-    if df_raw is None or df_raw.empty:
-        st.error(f"❌ No data found for **{selected_ticker}**. Check the ticker symbol and try again.")
-        st.stop()
-
-    current_price = float(df_raw['Close'].iloc[-1])
-    prev_price    = float(df_raw['Close'].iloc[-2])
-    price_chg     = current_price - prev_price
-    price_chg_pct = (price_chg / prev_price) * 100
-    high_52w      = float(df_raw['Close'].max())
-    low_52w       = float(df_raw['Close'].min())
-    chg_class     = "green" if price_chg >= 0 else "red"
-    chg_arrow     = "▲" if price_chg >= 0 else "▼"
-
-    c1, c2, c3, c4, c5 = st.columns(5)
-    with c1:
-        st.markdown(f"""<div class="metric-card">
-            <div class="metric-label">Current Price</div>
-            <div class="metric-value">{current_price:,.2f}</div>
-        </div>""", unsafe_allow_html=True)
-    with c2:
-        st.markdown(f"""<div class="metric-card">
-            <div class="metric-label">Day Change</div>
-            <div class="metric-value {chg_class}">
-            {chg_arrow} {abs(price_chg):.2f} ({abs(price_chg_pct):.2f}%)</div>
-        </div>""", unsafe_allow_html=True)
-    with c3:
-        st.markdown(f"""<div class="metric-card">
-            <div class="metric-label">52W High</div>
-            <div class="metric-value green">{high_52w:,.2f}</div>
-        </div>""", unsafe_allow_html=True)
-    with c4:
-        st.markdown(f"""<div class="metric-card">
-            <div class="metric-label">52W Low</div>
-            <div class="metric-value red">{low_52w:,.2f}</div>
-        </div>""", unsafe_allow_html=True)
-    with c5:
-        st.markdown(f"""<div class="metric-card">
-            <div class="metric-label">Trading Days</div>
-            <div class="metric-value purple">{len(df_raw):,}</div>
-        </div>""", unsafe_allow_html=True)
-
-    # ── TECHNICAL ANALYSIS ────────────────────────────────────
-    if run_technical:
-        st.markdown('<div class="section-title">🔍 Technical Analysis</div>',
-                    unsafe_allow_html=True)
-        with st.spinner("Computing RSI, MACD, Bollinger Bands, Moving Averages..."):
-            df_analyzed = compute_technicals(df_raw)
-
-        latest = df_analyzed.iloc[-1]
-        rsi    = float(latest['RSI'])
-        trend  = "BULLISH" if float(latest['MA_20']) > float(latest['MA_50']) else "BEARISH"
-        macd_s = "BULLISH" if float(latest['MACD']) > float(latest['Signal_Line']) else "BEARISH"
-        vol    = float(latest['Volatility_20d']) * 100
-
-        if rsi > 70:   rsi_sig, rsi_cls = "OVERBOUGHT", "red"
-        elif rsi < 30: rsi_sig, rsi_cls = "OVERSOLD",   "green"
-        else:          rsi_sig, rsi_cls = "NEUTRAL",     "purple"
-
-        trend_cls = "green" if trend  == "BULLISH" else "red"
-        macd_cls  = "green" if macd_s == "BULLISH" else "red"
-
-        t1, t2, t3, t4 = st.columns(4)
-        with t1:
-            st.markdown(f"""<div class="metric-card">
-                <div class="metric-label">Trend</div>
-                <div class="metric-value {trend_cls}">{trend}</div>
-            </div>""", unsafe_allow_html=True)
-        with t2:
-            st.markdown(f"""<div class="metric-card">
-                <div class="metric-label">RSI (14)</div>
-                <div class="metric-value {rsi_cls}">{rsi:.1f} — {rsi_sig}</div>
-            </div>""", unsafe_allow_html=True)
-        with t3:
-            st.markdown(f"""<div class="metric-card">
-                <div class="metric-label">MACD Signal</div>
-                <div class="metric-value {macd_cls}">{macd_s}</div>
-            </div>""", unsafe_allow_html=True)
-        with t4:
-            st.markdown(f"""<div class="metric-card">
-                <div class="metric-label">Annual Volatility</div>
-                <div class="metric-value purple">{vol:.1f}%</div>
-            </div>""", unsafe_allow_html=True)
-
-    # ── ARIMA PREDICTION ──────────────────────────────────────
-    if run_arima:
-        st.markdown(
-            f'<div class="section-title">🤖 ARIMA Forecast — Next {forecast_days} Days</div>',
-            unsafe_allow_html=True
-        )
-        with st.spinner(f"Training ARIMA and forecasting {forecast_days} days..."):
-            src_df = df_analyzed if df_analyzed is not None else df_raw
-            forecast_df, rmse, mae, d_order = run_arima_model(src_df, forecast_days)
-
-        pred_end  = float(forecast_df['Predicted'].iloc[-1])
-        pct_chg   = (pred_end - current_price) / current_price * 100
-        direction = "UP ▲" if pct_chg > 0 else "DOWN ▼"
-        dir_cls   = "green" if pct_chg > 0 else "red"
-        arima_result = {"rmse": rmse, "mae": mae,
-                        "pct_chg": pct_chg, "pred_end": pred_end,
-                        "direction": direction}
-
-        a1, a2, a3, a4 = st.columns(4)
-        with a1:
-            st.markdown(f"""<div class="metric-card">
-                <div class="metric-label">Model</div>
-                <div class="metric-value purple">ARIMA(5,{d_order},2)</div>
-            </div>""", unsafe_allow_html=True)
-        with a2:
-            st.markdown(f"""<div class="metric-card">
-                <div class="metric-label">RMSE Error</div>
-                <div class="metric-value">{rmse:.2f}</div>
-            </div>""", unsafe_allow_html=True)
-        with a3:
-            st.markdown(f"""<div class="metric-card">
-                <div class="metric-label">{forecast_days}D Predicted Price</div>
-                <div class="metric-value {dir_cls}">{pred_end:,.2f}</div>
-            </div>""", unsafe_allow_html=True)
-        with a4:
-            st.markdown(f"""<div class="metric-card">
-                <div class="metric-label">Expected Move</div>
-                <div class="metric-value {dir_cls}">
-                {direction} {abs(pct_chg):.2f}%</div>
-            </div>""", unsafe_allow_html=True)
-
-    # ── CHARTS ────────────────────────────────────────────────
-    chart_df = df_analyzed if df_analyzed is not None else df_raw
-    st.markdown('<div class="section-title">📉 Price Chart</div>', unsafe_allow_html=True)
-    st.plotly_chart(
-        plot_price_chart(chart_df.tail(365), selected_ticker, forecast_df),
-        use_container_width=True
-    )
-    st.markdown('<div class="section-title">📊 Volume</div>', unsafe_allow_html=True)
-    st.plotly_chart(plot_volume_chart(chart_df.tail(365)), use_container_width=True)
-
-    if forecast_df is not None:
-        with st.expander("📋 View Full Forecast Table"):
-            disp = forecast_df.copy()
-            disp['Date'] = disp['Date'].astype(str)
-            for c in ['Predicted', 'Lower_95', 'Upper_95']:
-                disp[c] = disp[c].round(2)
-            st.dataframe(disp, use_container_width=True, hide_index=True)
-
-    # ── SENTIMENT & NEWS ──────────────────────────────────────
-    if run_sentiment:
-        st.markdown('<div class="section-title">📰 Market Sentiment & News</div>',
-                    unsafe_allow_html=True)
-        with st.spinner("Fetching analyst data and headlines..."):
-            info, news_items = get_sentiment(selected_ticker)
-
-        rec     = info.get('recommendationKey', 'N/A').upper()
-        rec_cls = ("green" if "buy"  in rec.lower() else
-                   "red"   if "sell" in rec.lower() else "purple")
-
-        s1, s2, s3 = st.columns(3)
-        with s1:
-            st.markdown(f"""<div class="metric-card">
-                <div class="metric-label">Analyst Recommendation</div>
-                <div class="metric-value {rec_cls}">{rec}</div>
-            </div>""", unsafe_allow_html=True)
-        with s2:
-            target = info.get('targetMeanPrice', 'N/A')
-            st.markdown(f"""<div class="metric-card">
-                <div class="metric-label">Mean Price Target</div>
-                <div class="metric-value">{target}</div>
-            </div>""", unsafe_allow_html=True)
-        with s3:
-            n_analysts = info.get('numberOfAnalystOpinions', 'N/A')
-            st.markdown(f"""<div class="metric-card">
-                <div class="metric-label">Number of Analysts</div>
-                <div class="metric-value purple">{n_analysts}</div>
-            </div>""", unsafe_allow_html=True)
-
-        if news_items:
-            st.markdown("**Recent Headlines**")
-            for article in news_items:
-                title = article.get('title', '')
-                pub   = article.get('publisher', '')
-                link  = article.get('link', '#')
-                if title:
-                    st.markdown(f"""
-                    <div style='background:#16161f;border:1px solid #2a2a3a;
-                    border-radius:8px;padding:0.7rem 1rem;margin-bottom:0.5rem;'>
-                        <a href="{link}" target="_blank"
-                           style='color:#e8e8f0;text-decoration:none;
-                           font-size:0.88rem;font-weight:600;'>{title}</a>
-                        <div style='color:#6b6b80;font-size:0.72rem;
-                        font-family:JetBrains Mono,monospace;
-                        margin-top:0.2rem;'>{pub}</div>
-                    </div>""", unsafe_allow_html=True)
-
-    # ── GROQ LLM REPORT ───────────────────────────────────────
-    if run_llm_report and api_key:
-        st.markdown(
-            f'<div class="section-title">🧠 AI Report — Groq / {groq_model}</div>',
-            unsafe_allow_html=True
-        )
-
-        _data_store[selected_ticker]               = df_raw
-        _data_store[f"{selected_ticker}_analyzed"] = (
-            df_analyzed if df_analyzed is not None else df_raw
-        )
-        _data_store[f"{selected_ticker}_forecast"] = forecast_df
-
-        tech_line  = (
-            f"- Trend: {trend} | RSI: {round(rsi,1)} ({rsi_sig}) | "
-            f"MACD: {macd_s} | Volatility: {round(vol,1)}%"
-            if run_technical and df_analyzed is not None else ""
-        )
-        arima_line = (
-            f"- ARIMA({forecast_days}d): {direction} {round(abs(pct_chg),2)}% → {round(pred_end,2)}"
-            if run_arima and arima_result else ""
-        )
-        sent_line  = (
-            f"- Analyst: {rec} | Target: {info.get('targetMeanPrice','N/A') if info else 'N/A'}"
-            if run_sentiment and info else ""
-        )
-
-        prompt = f"""You are a professional quantitative analyst and stock market expert.
-
-Analyze {selected_ticker} ({display_name}) with the data below:
-
-MARKET DATA:
-- Period        : {data_period}
-- Current Price : {current_price:.2f}
-- 52W High/Low  : {high_52w:.2f} / {low_52w:.2f}
-- Day Change    : {price_chg:.2f} ({price_chg_pct:.2f}%)
-{tech_line}
-{arima_line}
-{sent_line}
-
-Write a complete professional stock analysis report with EXACTLY these 7 sections:
+═══════════════════════════════════════════════════════════
+              STOCK ANALYSIS REPORT — {ticker.upper()}
+═══════════════════════════════════════════════════════════
 
 1. EXECUTIVE SUMMARY
-2. CURRENT MARKET STATUS & PRICE ACTION
+2. CURRENT MARKET STATUS & PRICE ACTION  
 3. TECHNICAL ANALYSIS (RSI, MACD, Bollinger Bands, Moving Averages)
 4. ARIMA FORECAST INTERPRETATION & CONFIDENCE
-5. RISK ASSESSMENT (Bull scenario vs Bear scenario)
+5. RISK ASSESSMENT (Bull vs Bear scenario)
 6. MACRO CONTEXT & MARKET SENTIMENT
-7. FINAL RECOMMENDATION (Strong Buy / Buy / Hold / Sell / Strong Sell) with rationale
+7. FINAL RECOMMENDATION (Strong Buy / Buy / Hold / Sell / Strong Sell)
 
-Use specific numbers, be data-driven, and keep a professional tone."""
+Be data-driven, specific with numbers, and professional."""
 
-        with st.spinner(f"🧠 {groq_model} is writing your analysis report..."):
-            try:
-                agent_app  = build_agent(api_key, groq_model)
-                result     = agent_app.invoke({
-                    "messages": [HumanMessage(content=prompt)]
-                })
-                llm_report = result["messages"][-1].content
-                st.markdown(
-                    f'<div class="report-box">{llm_report}</div>',
-                    unsafe_allow_html=True
-                )
-            except Exception as e:
-                err = str(e)
-                st.error(f"❌ Groq API Error: {err}")
-                if "401" in err or "api_key" in err.lower() or "invalid" in err.lower():
-                    st.info("💡 Invalid API key. Get a free key at console.groq.com")
-                elif "rate" in err.lower() or "429" in err:
-                    st.info("💡 Rate limit hit. Wait a moment or switch to llama-3.1-8b-instant.")
-                elif "model" in err.lower():
-                    st.info("💡 Model unavailable. Try llama-3.1-8b-instant from the sidebar.")
-                else:
-                    st.info("💡 Check console.groq.com for status and try again.")
+    user_msg = (f"Analyze {ticker.upper()} for the past {period} "
+                f"with a {forecast_days}-day forecast. "
+                f"Produce the full investment report.")
 
-    # ── EXPORT ────────────────────────────────────────────────
-    st.markdown('<div class="section-title">💾 Export Data</div>', unsafe_allow_html=True)
-    d1, d2 = st.columns(2)
-    with d1:
-        st.download_button(
-            "⬇️ Download Raw Data (CSV)",
-            df_raw.to_csv().encode('utf-8'),
-            f"{selected_ticker}_raw_data.csv", "text/csv"
+    initial_state = {
+        "messages": [SM_cls(content=system_prompt), HM_cls(content=user_msg)]
+    }
+
+    try:
+        final_state = compiled.invoke(initial_state, config={"recursion_limit": 25})
+        ai_msgs = [m for m in final_state["messages"]
+                   if hasattr(m, "content") and not hasattr(m, "tool_calls")]
+        report = ai_msgs[-1].content if ai_msgs else "No report generated."
+        return report, store, None
+    except Exception as e:
+        return None, store, str(e)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  CHARTS
+# ══════════════════════════════════════════════════════════════════════════════
+def make_price_chart(df: pd.DataFrame, ticker: str, ta_df: pd.DataFrame = None):
+    fig = make_subplots(
+        rows=3, cols=1, shared_xaxes=True,
+        row_heights=[0.55, 0.25, 0.20],
+        subplot_titles=[f"{ticker} — Price & Bollinger Bands", "RSI", "MACD"],
+        vertical_spacing=0.05,
+    )
+
+    # Candlestick
+    fig.add_trace(go.Candlestick(
+        x=df.index, open=df["Open"], high=df["High"],
+        low=df["Low"], close=df["Close"],
+        name="Price", increasing_line_color="#00ff88",
+        decreasing_line_color="#ff4444",
+    ), row=1, col=1)
+
+    source = ta_df if (ta_df is not None and "BB_Upper" in ta_df.columns) else df
+
+    for col, color, name in [
+        ("MA20",     "#ffaa00", "MA20"),
+        ("MA50",     "#00aaff", "MA50"),
+        ("MA200",    "#ff00aa", "MA200"),
+        ("BB_Upper", "#888888", "BB Upper"),
+        ("BB_Lower", "#888888", "BB Lower"),
+        ("BB_Middle","#444444", "BB Mid"),
+    ]:
+        if col in source.columns:
+            fig.add_trace(go.Scatter(
+                x=source.index, y=source[col], name=name,
+                line=dict(color=color, width=1,
+                          dash="dot" if "BB" in col else "solid"),
+                opacity=0.8,
+            ), row=1, col=1)
+
+    # RSI
+    if "RSI" in source.columns:
+        fig.add_trace(go.Scatter(
+            x=source.index, y=source["RSI"], name="RSI",
+            line=dict(color="#ffaa00", width=1.5)
+        ), row=2, col=1)
+        for lvl, col in [(70, "#ff4444"), (30, "#00ff88")]:
+            fig.add_hline(y=lvl, line_color=col, line_dash="dot",
+                          line_width=1, row=2, col=1)
+
+    # MACD
+    if "MACD" in source.columns:
+        fig.add_trace(go.Scatter(
+            x=source.index, y=source["MACD"], name="MACD",
+            line=dict(color="#00d4ff", width=1.5)
+        ), row=3, col=1)
+        fig.add_trace(go.Scatter(
+            x=source.index, y=source["MACD_Signal"], name="Signal",
+            line=dict(color="#ff4444", width=1.5)
+        ), row=3, col=1)
+        if "MACD_Hist" in source.columns:
+            colors = ["#00ff88" if v >= 0 else "#ff4444"
+                      for v in source["MACD_Hist"].fillna(0)]
+            fig.add_trace(go.Bar(
+                x=source.index, y=source["MACD_Hist"],
+                name="Histogram", marker_color=colors, opacity=0.6,
+            ), row=3, col=1)
+
+    fig.update_layout(
+        height=700, paper_bgcolor="#0e1117", plot_bgcolor="#0d1117",
+        font=dict(color="#ccd6f6"), legend=dict(bgcolor="#1a1a2e"),
+        xaxis_rangeslider_visible=False,
+    )
+    for i in range(1, 4):
+        fig.update_xaxes(gridcolor="#1a1a2e", row=i, col=1)
+        fig.update_yaxes(gridcolor="#1a1a2e", row=i, col=1)
+    return fig
+
+
+def make_forecast_chart(df: pd.DataFrame, fc_df: pd.DataFrame, ticker: str):
+    fig = go.Figure()
+
+    tail = df["Close"].squeeze().astype(float).tail(90)
+    fig.add_trace(go.Scatter(
+        x=tail.index, y=tail.values, name="Historical",
+        line=dict(color="#00d4ff", width=2)
+    ))
+    fig.add_trace(go.Scatter(
+        x=fc_df["Date"], y=fc_df["Forecast"], name="ARIMA Forecast",
+        line=dict(color="#ffaa00", width=2, dash="dash")
+    ))
+    fig.add_trace(go.Scatter(
+        x=pd.concat([fc_df["Date"], fc_df["Date"][::-1]]),
+        y=pd.concat([fc_df["Upper_95"], fc_df["Lower_95"][::-1]]),
+        fill="toself", fillcolor="rgba(255,170,0,0.1)",
+        line=dict(color="rgba(255,170,0,0)"),
+        name="95% CI",
+    ))
+    fig.update_layout(
+        title=f"{ticker} — ARIMA {len(fc_df)}-Day Forecast",
+        height=420, paper_bgcolor="#0e1117", plot_bgcolor="#0d1117",
+        font=dict(color="#ccd6f6"),
+        xaxis=dict(gridcolor="#1a1a2e"),
+        yaxis=dict(gridcolor="#1a1a2e"),
+    )
+    return fig
+
+
+def make_volume_chart(df: pd.DataFrame, ticker: str):
+    colors = ["#00ff88" if r >= 0 else "#ff4444"
+              for r in df["Close"].diff().fillna(0)]
+    fig = go.Figure(go.Bar(
+        x=df.index, y=df["Volume"].astype(float),
+        marker_color=colors, opacity=0.7, name="Volume"
+    ))
+    fig.update_layout(
+        title=f"{ticker} — Volume",
+        height=280, paper_bgcolor="#0e1117", plot_bgcolor="#0d1117",
+        font=dict(color="#ccd6f6"),
+        xaxis=dict(gridcolor="#1a1a2e"),
+        yaxis=dict(gridcolor="#1a1a2e"),
+    )
+    return fig
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  SIDEBAR
+# ══════════════════════════════════════════════════════════════════════════════
+with st.sidebar:
+    st.markdown("### ⚙️ Configuration")
+    st.markdown("---")
+
+    # Groq API key (check secrets first, then env, then input)
+    default_key = ""
+    try:
+        default_key = st.secrets.get("GROQ_API_KEY", "")
+    except Exception:
+        default_key = os.getenv("GROQ_API_KEY", "")
+
+    groq_key = st.text_input(
+        "🔑 Groq API Key",
+        value=default_key,
+        type="password",
+        placeholder="gsk_...",
+        help="Get free key at console.groq.com",
+    )
+
+    model_name = st.selectbox("🤖 Model", [
+        "llama-3.1-8b-instant",
+        "llama-3.3-70b-versatile",
+        "llama-3.1-70b-versatile",
+        "mixtral-8x7b-32768",
+        "gemma2-9b-it",
+    ])
+
+    st.markdown("---")
+    st.markdown("### 🌍 Asset Selection")
+
+    category = st.selectbox("Category", [
+        "🇺🇸 US Stocks",
+        "🌍 Indices",
+        "🛢️ Commodities",
+        "💱 Currencies",
+        "🇵🇰 Pakistan PSX",
+        "✏️ Custom Ticker",
+    ])
+
+    preset_map = {
+        "🇺🇸 US Stocks":    ["AAPL","MSFT","GOOGL","AMZN","NVDA","TSLA","META","NFLX","JPM","V"],
+        "🌍 Indices":        ["^GSPC","^IXIC","^DJI","^VIX","^FTSE","^N225"],
+        "🛢️ Commodities":   ["GC=F","CL=F","SI=F","NG=F","ZC=F"],
+        "💱 Currencies":     ["EURUSD=X","GBPUSD=X","JPYUSD=X","DX-Y.NYB","PKRUSD=X"],
+        "🇵🇰 Pakistan PSX": ["^KSE100","ENGRO.KA","HBL.KA","OGDC.KA","PSO.KA","LUCK.KA"],
+        "✏️ Custom Ticker":  [],
+    }
+
+    if category == "✏️ Custom Ticker":
+        ticker = st.text_input("Ticker Symbol", value="AAPL",
+                               placeholder="e.g. AAPL, ^GSPC, GC=F").upper().strip()
+    else:
+        options = preset_map[category]
+        ticker = st.selectbox("Asset", options)
+
+    st.markdown("---")
+    st.markdown("### 📅 Parameters")
+
+    period_label = st.select_slider("Historical Period", [
+        "6mo","1y","2y","3y","5y"
+    ], value="1y")
+
+    forecast_days = st.slider("Forecast Days", 7, 90, 30, step=7)
+
+    st.markdown("---")
+    st.markdown("### 🔧 Tools")
+    use_ta        = st.checkbox("Technical Analysis",   value=True)
+    use_arima     = st.checkbox("ARIMA Forecasting",    value=True)
+    use_sentiment = st.checkbox("Sentiment & News",     value=True)
+
+    st.markdown("---")
+    run_btn = st.button("🚀 Run Analysis")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  MAIN PANEL
+# ══════════════════════════════════════════════════════════════════════════════
+st.markdown("""
+<div class='main-header'>
+  <h1>📈 Stock Agent App</h1>
+  <p>AI-Powered Market Analysis · LangGraph · Groq Llama 3.1 · ARIMA · yfinance</p>
+</div>
+""", unsafe_allow_html=True)
+
+if not run_btn:
+    st.info("👈 Configure your analysis in the sidebar, then click **🚀 Run Analysis**")
+
+    col1, col2, col3, col4 = st.columns(4)
+    for col, icon, title, desc in [
+        (col1, "📊", "Technical Analysis", "RSI · MACD · Bollinger Bands · MAs"),
+        (col2, "🔮", "ARIMA Forecast",      "7–90 day price forecasting"),
+        (col3, "📰", "Sentiment & News",    "Analyst ratings & headlines"),
+        (col4, "🤖", "AI Report",           "Full Groq LLM investment report"),
+    ]:
+        with col:
+            st.markdown(f"""
+            <div class='metric-card'>
+              <div style='font-size:2rem'>{icon}</div>
+              <div style='color:#00d4ff;font-weight:bold'>{title}</div>
+              <div class='label'>{desc}</div>
+            </div>""", unsafe_allow_html=True)
+    st.stop()
+
+
+# ── Validate API key ──────────────────────────────────────────────────────────
+if not groq_key:
+    st.error("❌ Please enter your Groq API key in the sidebar.")
+    st.stop()
+
+if not ticker:
+    st.error("❌ Please enter a ticker symbol.")
+    st.stop()
+
+# ── Step 1: Fetch data ────────────────────────────────────────────────────────
+with st.spinner(f"⏳ Fetching data for **{ticker}** …"):
+    raw = collect_stock_data(ticker, period_label)
+
+if "error" in raw:
+    st.error(f"❌ {raw['error']}")
+    st.markdown("""
+    **Troubleshooting tips:**
+    - Double-check the ticker symbol (e.g. `AAPL`, `^GSPC`, `GC=F`)
+    - Verify it on [finance.yahoo.com](https://finance.yahoo.com)
+    - PSX tickers require `.KA` suffix (e.g. `HBL.KA`)
+    """)
+    st.stop()
+
+df   = raw["df"].copy()
+info = raw.get("info", {})
+lat  = raw["latest"]
+
+# ── KPI Row ───────────────────────────────────────────────────────────────────
+st.markdown(f"<div class='section-header'>📊 {info.get('name', ticker)} — Live Snapshot</div>",
+            unsafe_allow_html=True)
+
+cols = st.columns(5)
+change_cls = "change-pos" if lat["change"] >= 0 else "change-neg"
+sign       = "▲" if lat["change"] >= 0 else "▼"
+
+kpis = [
+    ("Current Price",   f"{lat['close']:,.4f}",
+     f"<span class='{change_cls}'>{sign} {abs(lat['change_pct']):.2f}%</span>"),
+    ("Open",            f"{lat['open']:,.4f}",  lat["date"]),
+    ("High",            f"{lat['high']:,.4f}",  "Today"),
+    ("Low",             f"{lat['low']:,.4f}",   "Today"),
+    ("Volume",          f"{lat['volume']:,}",   "Shares"),
+]
+for col, (label, val, sub) in zip(cols, kpis):
+    with col:
+        st.markdown(f"""
+        <div class='metric-card'>
+          <div class='label'>{label}</div>
+          <div class='value'>{val}</div>
+          <div>{sub}</div>
+        </div>""", unsafe_allow_html=True)
+
+# extra info row
+if info.get("sector") and info["sector"] != "N/A":
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Sector",   info.get("sector","N/A"))
+    c2.metric("P/E Ratio", info.get("pe_ratio","N/A"))
+    if info.get("52w_high"):
+        c3.metric("52W High", f"{info['52w_high']:,.2f}")
+    if info.get("52w_low"):
+        c4.metric("52W Low",  f"{info['52w_low']:,.2f}")
+
+# ── Step 2: Technical Analysis ────────────────────────────────────────────────
+ta_result = None
+if use_ta:
+    with st.spinner("🔧 Running Technical Analysis …"):
+        ta_result = run_technical_analysis(df.copy())
+    df_ta = ta_result["df"]
+    ta_sum = ta_result["summary"]
+
+    st.markdown("<div class='section-header'>📉 Technical Analysis</div>",
+                unsafe_allow_html=True)
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Trend",        ta_sum["trend"])
+    c2.metric("RSI",          f"{ta_sum['rsi']} ({ta_sum['rsi_signal']})")
+    c3.metric("MACD Signal",  ta_sum["macd_signal"])
+    c4.metric("Volatility",   f"{ta_sum['volatility_pct']}%")
+    c1.metric("MA20",  f"{ta_sum['ma20']:,.2f}" if ta_sum["ma20"] else "N/A")
+    c2.metric("MA50",  f"{ta_sum['ma50']:,.2f}" if ta_sum["ma50"] else "N/A")
+    c3.metric("MA200", f"{ta_sum['ma200']:,.2f}" if ta_sum["ma200"] else "N/A")
+    c4.metric("BB Position",  f"{ta_sum['bb_position_pct']}%")
+
+    st.plotly_chart(make_price_chart(df, ticker, df_ta), use_container_width=True)
+else:
+    st.plotly_chart(make_price_chart(df, ticker), use_container_width=True)
+
+# Volume chart
+if "Volume" in df.columns:
+    st.plotly_chart(make_volume_chart(df, ticker), use_container_width=True)
+
+# ── Step 3: ARIMA ─────────────────────────────────────────────────────────────
+arima_result = None
+if use_arima:
+    with st.spinner(f"🔮 Running ARIMA Forecast ({forecast_days} days) …"):
+        arima_result = run_arima_forecast(df.copy(), forecast_days)
+
+    st.markdown("<div class='section-header'>🔮 ARIMA Forecast</div>",
+                unsafe_allow_html=True)
+
+    if "error" in arima_result:
+        st.warning(f"ARIMA: {arima_result['error']}")
+    else:
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Current Price",  f"{arima_result['current']:,.4f}")
+        c2.metric(f"Day {forecast_days} Forecast",
+                  f"{arima_result['forecast_end']:,.4f}")
+        c3.metric("Expected Change", f"{arima_result['expected_change_pct']:+.2f}%")
+        c4.metric("Direction",       arima_result["direction"])
+
+        st.plotly_chart(
+            make_forecast_chart(df, arima_result["fc_df"], ticker),
+            use_container_width=True
         )
-    with d2:
-        if forecast_df is not None:
-            st.download_button(
-                "⬇️ Download Forecast (CSV)",
-                forecast_df.to_csv(index=False).encode('utf-8'),
-                f"{selected_ticker}_forecast.csv", "text/csv"
-            )
+
+        csv_fc = arima_result["fc_df"].to_csv(index=False)
+        st.download_button("⬇️ Download Forecast CSV", csv_fc,
+                           f"{ticker}_forecast.csv", "text/csv")
+
+# ── Step 4: Sentiment ─────────────────────────────────────────────────────────
+sent_result = None
+if use_sentiment:
+    with st.spinner("📰 Fetching Sentiment & News …"):
+        sent_result = run_sentiment_analysis(ticker)
+
+    st.markdown("<div class='section-header'>📰 Market Sentiment & News</div>",
+                unsafe_allow_html=True)
+
+    pt = sent_result.get("price_targets", {})
+    if pt:
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Analyst Rating", str(pt.get("recommendation_key","N/A")).upper())
+        if pt.get("target_mean"):
+            c2.metric("Target (Mean)", f"{pt['target_mean']:,.2f}")
+        if pt.get("target_high"):
+            c3.metric("Target (High)", f"{pt['target_high']:,.2f}")
+        if pt.get("target_low"):
+            c4.metric("Target (Low)",  f"{pt['target_low']:,.2f}")
+
+    news = sent_result.get("news", [])
+    if news:
+        st.markdown("**Latest Headlines:**")
+        for n in news:
+            title = n.get("title", "")
+            pub   = n.get("publisher", "")
+            link  = n.get("link", "#")
+            if title:
+                st.markdown(f"• [{title}]({link}) — *{pub}*")
+
+# ── Raw data download ─────────────────────────────────────────────────────────
+st.markdown("<div class='section-header'>📥 Raw Data Export</div>",
+            unsafe_allow_html=True)
+csv_raw = df.reset_index().to_csv(index=False)
+st.download_button("⬇️ Download Historical Data CSV", csv_raw,
+                   f"{ticker}_data.csv", "text/csv")
+
+# ── Step 5: AI Report ─────────────────────────────────────────────────────────
+st.markdown("<div class='section-header'>🤖 AI Investment Report (Groq LLM)</div>",
+            unsafe_allow_html=True)
+
+with st.spinner("🧠 Agent thinking and writing report … (may take 30–60s)"):
+    report, store, agent_err = run_agent(
+        ticker, period_label, forecast_days,
+        groq_key, model_name,
+        use_ta, use_arima, use_sentiment
+    )
+
+if agent_err:
+    st.error(f"Agent error: {agent_err}")
+    st.info("The charts and metrics above are still valid — only the LLM report failed.")
+elif report:
+    st.markdown(f"<div class='report-box'>{report}</div>", unsafe_allow_html=True)
+    st.download_button("⬇️ Download Report", report,
+                       f"{ticker}_report.txt", "text/plain")
+
+# ── Footer ────────────────────────────────────────────────────────────────────
+st.markdown("---")
+st.markdown("""
+<div style='text-align:center;color:#8892b0;font-size:0.8rem'>
+⚠️ <b>Disclaimer:</b> For educational purposes only. Not financial advice.
+Always consult a qualified financial advisor before making investment decisions.<br>
+Built by <b>Qamar Usman</b> · LangGraph · Groq · yfinance · Streamlit
+</div>
+""", unsafe_allow_html=True)
